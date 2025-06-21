@@ -110,6 +110,21 @@ class AutoPoster:
         
         await self.send_report("✅ تم تشغيل اليوزر بوت بنجاح!")
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - تم تشغيل اليوزر بوت بنجاح!")
+        
+        # بدء مهمة الإرسال الدوري
+        asyncio.create_task(self.periodic_status_update())
+
+    async def periodic_status_update(self):
+        """إرسال تحديث الحالة كل 20 دقيقة"""
+        while self.is_running:
+            await asyncio.sleep(1200)  # 20 دقيقة = 1200 ثانية
+            try:
+                status_message = "🤖 البوت يعمل بشكل طبيعي وجميع الوظائف تعمل بكفاءة ✅"
+                await self.client.send_message("https://t.me/xox1n", status_message)
+                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - تم إرسال تحديث الحالة")
+            except Exception as e:
+                error_msg = f"خطأ في إرسال تحديث الحالة: {e}"
+                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
 
     async def send_report(self, message):
         """إرسال تقرير إلى القناة المحددة"""
