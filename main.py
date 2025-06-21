@@ -99,6 +99,7 @@ class AutoPoster:
         self.client = None
         self.is_running = True
         self.report_channel = REPORT_CHANNEL
+        self.last_activity = datetime.now()
 
     async def initialize(self):
         """تهيئة العميل"""
@@ -113,23 +114,39 @@ class AutoPoster:
         
         # بدء مهمة الإرسال الدوري
         asyncio.create_task(self.periodic_status_update())
+        asyncio.create_task(self.keep_alive_checker())
+
+    async def keep_alive_checker(self):
+        """مهمة للتأكد من استمرارية التشغيل"""
+        while self.is_running:
+            await asyncio.sleep(300)  # كل 5 دقائق
+            if (datetime.now() - self.last_activity).total_seconds() > 600:
+                await self.send_report("🔄 البوت يعيد التشغيل بسبب عدم النشاط")
+                await self.restart_bot()
+
+    async def restart_bot(self):
+        """إعادة تشغيل البوت"""
+        await self.send_report("🔄 جاري إعادة تشغيل البوت...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     async def periodic_status_update(self):
-        """إرسال تحديث الحالة كل 20 دقيقة"""
+        """إرسال تحديث الحالة كل 10 دقائق"""
         while self.is_running:
-            await asyncio.sleep(1200)  # 20 دقيقة = 1200 ثانية
             try:
                 status_message = "🤖 البوت يعمل بشكل طبيعي وجميع الوظائف تعمل بكفاءة ✅"
-                await self.client.send_message("https://t.me/xox1n", status_message)
+                await self.client.send_message(self.report_channel, status_message)
                 print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - تم إرسال تحديث الحالة")
             except Exception as e:
                 error_msg = f"خطأ في إرسال تحديث الحالة: {e}"
                 print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
+            
+            await asyncio.sleep(600)  # 10 دقائق = 600 ثانية
 
     async def send_report(self, message):
         """إرسال تقرير إلى القناة المحددة"""
         try:
             await self.client.send_message(self.report_channel, message)
+            self.last_activity = datetime.now()
         except Exception as e:
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - فشل في إرسال التقرير: {e}")
 
@@ -138,7 +155,6 @@ class AutoPoster:
         try:
             dialogs = await self.client.get_dialogs()
             groups = [dialog for dialog in dialogs if dialog.is_group]
-            await self.send_report(f"🔍 تم جلب {len(groups)} مجموعة متاحة للنشر")
             return groups
         except Exception as e:
             error_msg = f"خطأ في الحصول على المجموعات: {e}"
@@ -160,8 +176,14 @@ class AutoPoster:
                 print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
                 return
             
+            total_groups = len(groups)
+            await self.send_report(f"🔍 تم جلب {total_groups} مجموعة متاحة للنشر")
+            
             text = BIO_TEXTS[index-1]
             success_count = 0
+            failed_count = 0
+            no_permission_count = 0
+            failed_groups = []
             
             for group in groups:
                 try:
@@ -171,11 +193,22 @@ class AutoPoster:
                     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {report_msg}")
                     await asyncio.sleep(random.uniform(5, 15))
                 except Exception as e:
+                    if "Forbidden" in str(e):
+                        no_permission_count += 1
+                    else:
+                        failed_count += 1
+                        failed_groups.append(group.title)
                     error_msg = f"خطأ في النشر في {group.title}: {e}"
                     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(5)
             
-            summary = f"📊 ملخص نشر البايو {index}: {success_count}/{len(groups)} مجموعة"
+            summary = (
+                f"📊 ملخص نشر البايو {index}:\n"
+                f"✅ نجاح: {success_count}\n"
+                f"❌ فشل: {failed_count}\n"
+                f"🚫 بدون صلاحية: {no_permission_count}\n"
+                f"📋 المجموعات الفاشلة: {', '.join(failed_groups[:5])}{'...' if len(failed_groups) > 5 else ''}"
+            )
             await self.send_report(summary)
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {summary}")
             
@@ -198,8 +231,14 @@ class AutoPoster:
                 print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
                 return
             
+            total_groups = len(groups)
+            await self.send_report(f"🔍 تم جلب {total_groups} مجموعة متاحة للنشر")
+            
             text = f"{LINK_TEXTS_1[index-1]}\n{LINKS[0]}"
             success_count = 0
+            failed_count = 0
+            no_permission_count = 0
+            failed_groups = []
             
             for group in groups:
                 try:
@@ -209,11 +248,22 @@ class AutoPoster:
                     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {report_msg}")
                     await asyncio.sleep(random.uniform(5, 15))
                 except Exception as e:
+                    if "Forbidden" in str(e):
+                        no_permission_count += 1
+                    else:
+                        failed_count += 1
+                        failed_groups.append(group.title)
                     error_msg = f"خطأ في نشر رابط الحصريات في {group.title}: {e}"
                     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(5)
             
-            summary = f"📊 ملخص نشر رابط الحصريات {index}: {success_count}/{len(groups)} مجموعة"
+            summary = (
+                f"📊 ملخص نشر رابط الحصريات {index}:\n"
+                f"✅ نجاح: {success_count}\n"
+                f"❌ فشل: {failed_count}\n"
+                f"🚫 بدون صلاحية: {no_permission_count}\n"
+                f"📋 المجموعات الفاشلة: {', '.join(failed_groups[:5])}{'...' if len(failed_groups) > 5 else ''}"
+            )
             await self.send_report(summary)
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {summary}")
             
@@ -236,8 +286,14 @@ class AutoPoster:
                 print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
                 return
             
+            total_groups = len(groups)
+            await self.send_report(f"🔍 تم جلب {total_groups} مجموعة متاحة للنشر")
+            
             text = f"{LINK_TEXTS_2[index-1]}\n{LINKS[1]}"
             success_count = 0
+            failed_count = 0
+            no_permission_count = 0
+            failed_groups = []
             
             for group in groups:
                 try:
@@ -247,11 +303,22 @@ class AutoPoster:
                     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {report_msg}")
                     await asyncio.sleep(random.uniform(5, 15))
                 except Exception as e:
+                    if "Forbidden" in str(e):
+                        no_permission_count += 1
+                    else:
+                        failed_count += 1
+                        failed_groups.append(group.title)
                     error_msg = f"خطأ في نشر رابط المقاطع في {group.title}: {e}"
                     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(5)
             
-            summary = f"📊 ملخص نشر رابط المقاطع {index}: {success_count}/{len(groups)} مجموعة"
+            summary = (
+                f"📊 ملخص نشر رابط المقاطع {index}:\n"
+                f"✅ نجاح: {success_count}\n"
+                f"❌ فشل: {failed_count}\n"
+                f"🚫 بدون صلاحية: {no_permission_count}\n"
+                f"📋 المجموعات الفاشلة: {', '.join(failed_groups[:5])}{'...' if len(failed_groups) > 5 else ''}"
+            )
             await self.send_report(summary)
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {summary}")
             
@@ -321,6 +388,7 @@ async def main():
             await asyncio.sleep(60)
 
 if __name__ == '__main__':
+    import sys
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
