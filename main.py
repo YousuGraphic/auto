@@ -2,7 +2,7 @@ import asyncio
 import random
 import os
 from datetime import datetime
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 from dotenv import load_dotenv
 from keep_alive import keep_alive
 
@@ -14,10 +14,9 @@ API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
 USER_ID = int(os.getenv('USER_ID'))
 REPORT_CHANNEL = os.getenv('REPORT_CHANNEL')
+MONITOR_CHANNEL = "https://t.me/xqrrp"  # القناة التي سيتم مراقبتها
 
-# إعدادات النشر
-PUBLISH_INTERVAL = 3600  # كل ساعة (بالثواني)
-LINKS_PUBLISH_INTERVAL = 10800  # كل 3 ساعات (بالثواني)
+# روابط القنوات
 LINKS = [
     "https://t.me/+V84P28GntXswYzk0",  # قناة الحصريات
     "https://t.me/+hygcUTDegyAxMTc0"   # قناة المقاطع الحصرية
@@ -99,14 +98,16 @@ class AutoPoster:
     def __init__(self):
         self.client = None
         self.is_running = True
-        self.publish_interval = PUBLISH_INTERVAL
-        self.links_publish_interval = LINKS_PUBLISH_INTERVAL
         self.report_channel = REPORT_CHANNEL
 
     async def initialize(self):
         """تهيئة العميل"""
         self.client = TelegramClient('userbot_session', API_ID, API_HASH)
         await self.client.start()
+        
+        # إضافة معالج الأحداث لمراقبة القناة
+        self.client.add_event_handler(self.handle_channel_message, events.NewMessage(chats=MONITOR_CHANNEL))
+        
         await self.send_report("✅ تم تشغيل اليوزر بوت بنجاح!")
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - تم تشغيل اليوزر بوت بنجاح!")
 
@@ -130,119 +131,164 @@ class AutoPoster:
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
             return []
 
-    async def publish_message(self):
-        """نشر رسالة في جميع المجموعات"""
-        groups = await self.get_all_groups()
-        if not groups:
-            msg = "⚠️ لا توجد مجموعات متاحة للنشر"
-            await self.send_report(msg)
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
-            return
-
-        text = random.choice(BIO_TEXTS)
-        success_count = 0
-        
-        for group in groups:
-            try:
-                await self.client.send_message(group.id, text)
-                success_count += 1
-                report_msg = f"📢 تم النشر في {group.title}"
-                await self.send_report(report_msg)
-                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {report_msg}")
-                await asyncio.sleep(random.uniform(5, 15))
-            except Exception as e:
-                error_msg = f"خطأ في النشر في {group.title}: {e}"
-                await self.send_report(f"❌ {error_msg}")
-                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
-                await asyncio.sleep(30)
-        
-        summary = f"📊 ملخص نشر البايو: {success_count}/{len(groups)} مجموعة"
-        await self.send_report(summary)
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {summary}")
-
-    async def publish_links(self):
-        """نشر الروابط في جميع المجموعات"""
-        groups = await self.get_all_groups()
-        if not groups:
-            msg = "⚠️ لا توجد مجموعات متاحة لنشر الروابط"
-            await self.send_report(msg)
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
-            return
-
-        success_count = 0
-        
-        for group in groups:
-            try:
-                # نشر الرابط الأول مع نص عشوائي
-                link = LINKS[0]
-                text = random.choice(LINK_TEXTS_1)
-                await self.client.send_message(group.id, f"{text}\n{link}")
-                report_msg = f"🔗 تم نشر رابط الحصريات في {group.title}"
-                await self.send_report(report_msg)
-                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {report_msg}")
-                await asyncio.sleep(random.uniform(5, 15))
-                
-                # نشر الرابط الثاني مع نص عشوائي
-                link = LINKS[1]
-                text = random.choice(LINK_TEXTS_2)
-                await self.client.send_message(group.id, f"{text}\n{link}")
-                report_msg = f"🔗 تم نشر رابط المقاطع في {group.title}"
-                await self.send_report(report_msg)
-                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {report_msg}")
-                await asyncio.sleep(random.uniform(5, 15))
-                
-                success_count += 1
-            except Exception as e:
-                error_msg = f"خطأ في نشر الروابط في {group.title}: {e}"
-                await self.send_report(f"❌ {error_msg}")
-                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
-                await asyncio.sleep(30)
-        
-        summary = f"📊 ملخص نشر الروابط: {success_count}/{len(groups)} مجموعة"
-        await self.send_report(summary)
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {summary}")
-
-    async def schedule_publishing(self):
-        """جدولة النشر التلقائي"""
-        while self.is_running:
-            try:
-                await self.publish_message()
-                msg = f"⏳ انتظار {self.publish_interval//3600} ساعة للنشر التالي"
+    async def publish_bio(self, index):
+        """نشر صيغة البايو المحددة"""
+        try:
+            if index < 1 or index > 20:
+                await self.send_report("❌ رقم صيغة البايو غير صحيح (يجب أن يكون بين 1 و 20)")
+                return
+            
+            groups = await self.get_all_groups()
+            if not groups:
+                msg = "⚠️ لا توجد مجموعات متاحة للنشر"
                 await self.send_report(msg)
                 print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
-                await asyncio.sleep(self.publish_interval)
-            except Exception as e:
-                error_msg = f"خطأ في جدولة النشر: {e}"
-                await self.send_report(f"❌ {error_msg}")
-                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
-                await asyncio.sleep(60)
+                return
+            
+            text = BIO_TEXTS[index-1]
+            success_count = 0
+            
+            for group in groups:
+                try:
+                    await self.client.send_message(group.id, text)
+                    success_count += 1
+                    report_msg = f"📢 تم النشر في {group.title} (بايو{index})"
+                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {report_msg}")
+                    await asyncio.sleep(random.uniform(5, 15))
+                except Exception as e:
+                    error_msg = f"خطأ في النشر في {group.title}: {e}"
+                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
+                    await asyncio.sleep(30)
+            
+            summary = f"📊 ملخص نشر البايو {index}: {success_count}/{len(groups)} مجموعة"
+            await self.send_report(summary)
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {summary}")
+            
+        except Exception as e:
+            error_msg = f"خطأ في نشر البايو: {e}"
+            await self.send_report(f"❌ {error_msg}")
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
 
-    async def schedule_links_publishing(self):
-        """جدولة نشر الروابط"""
-        while self.is_running:
-            try:
-                await self.publish_links()
-                msg = f"⏳ انتظار {self.links_publish_interval//3600} ساعة لنشر الروابط التالي"
+    async def publish_hisryat(self, index):
+        """نشر صيغة رابط الحصريات المحددة"""
+        try:
+            if index < 1 or index > 20:
+                await self.send_report("❌ رقم صيغة الحصريات غير صحيح (يجب أن يكون بين 1 و 20)")
+                return
+            
+            groups = await self.get_all_groups()
+            if not groups:
+                msg = "⚠️ لا توجد مجموعات متاحة لنشر الروابط"
                 await self.send_report(msg)
                 print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
-                await asyncio.sleep(self.links_publish_interval)
-            except Exception as e:
-                error_msg = f"خطأ في جدولة نشر الروابط: {e}"
-                await self.send_report(f"❌ {error_msg}")
-                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
-                await asyncio.sleep(60)
+                return
+            
+            text = f"{LINK_TEXTS_1[index-1]}\n{LINKS[0]}"
+            success_count = 0
+            
+            for group in groups:
+                try:
+                    await self.client.send_message(group.id, text)
+                    success_count += 1
+                    report_msg = f"🔗 تم نشر رابط الحصريات في {group.title} (حصريات{index})"
+                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {report_msg}")
+                    await asyncio.sleep(random.uniform(5, 15))
+                except Exception as e:
+                    error_msg = f"خطأ في نشر رابط الحصريات في {group.title}: {e}"
+                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
+                    await asyncio.sleep(30)
+            
+            summary = f"📊 ملخص نشر رابط الحصريات {index}: {success_count}/{len(groups)} مجموعة"
+            await self.send_report(summary)
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {summary}")
+            
+        except Exception as e:
+            error_msg = f"خطأ في نشر رابط الحصريات: {e}"
+            await self.send_report(f"❌ {error_msg}")
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
+
+    async def publish_magtae(self, index):
+        """نشر صيغة رابط المقاطع المحددة"""
+        try:
+            if index < 1 or index > 20:
+                await self.send_report("❌ رقم صيغة المقاطع غير صحيح (يجب أن يكون بين 1 و 20)")
+                return
+            
+            groups = await self.get_all_groups()
+            if not groups:
+                msg = "⚠️ لا توجد مجموعات متاحة لنشر الروابط"
+                await self.send_report(msg)
+                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
+                return
+            
+            text = f"{LINK_TEXTS_2[index-1]}\n{LINKS[1]}"
+            success_count = 0
+            
+            for group in groups:
+                try:
+                    await self.client.send_message(group.id, text)
+                    success_count += 1
+                    report_msg = f"🔗 تم نشر رابط المقاطع في {group.title} (مقاطع{index})"
+                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {report_msg}")
+                    await asyncio.sleep(random.uniform(5, 15))
+                except Exception as e:
+                    error_msg = f"خطأ في نشر رابط المقاطع في {group.title}: {e}"
+                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
+                    await asyncio.sleep(30)
+            
+            summary = f"📊 ملخص نشر رابط المقاطع {index}: {success_count}/{len(groups)} مجموعة"
+            await self.send_report(summary)
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {summary}")
+            
+        except Exception as e:
+            error_msg = f"خطأ في نشر رابط المقاطع: {e}"
+            await self.send_report(f"❌ {error_msg}")
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
+
+    async def handle_channel_message(self, event):
+        """معالجة الرسائل الواردة في القناة"""
+        try:
+            message = event.message.message.lower().strip()
+            
+            # معالجة أوامر البايو
+            if message.startswith("بايو"):
+                num = message.replace("بايو", "").strip()
+                if num.isdigit():
+                    index = int(num)
+                    await self.send_report(f"📢 تم استلام أمر نشر بايو{index}")
+                    await self.publish_bio(index)
+            
+            # معالجة أوامر الحصريات
+            elif message.startswith("حصريات"):
+                num = message.replace("حصريات", "").strip()
+                if num.isdigit():
+                    index = int(num)
+                    await self.send_report(f"🔗 تم استلام أمر نشر حصريات{index}")
+                    await self.publish_hisryat(index)
+            
+            # معالجة أوامر المقاطع
+            elif message.startswith("مقاطع"):
+                num = message.replace("مقاطع", "").strip()
+                if num.isdigit():
+                    index = int(num)
+                    await self.send_report(f"🎥 تم استلام أمر نشر مقاطع{index}")
+                    await self.publish_magtae(index)
+            
+            # إرسال رسالة تأكيد الاستلام
+            await event.message.mark_as_read()
+            
+        except Exception as e:
+            error_msg = f"خطأ في معالجة الرسالة: {e}"
+            await self.send_report(f"❌ {error_msg}")
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_msg}")
 
     async def run(self):
         """تشغيل البوت"""
         await self.initialize()
         
-        # بدء المهام في الخلفية
-        asyncio.create_task(self.schedule_publishing())
-        asyncio.create_task(self.schedule_links_publishing())
-        
         # استمرار التشغيل حتى يتم إيقافه
         while self.is_running:
-            await asyncio.sleep(3600)
+            await asyncio.sleep(1)
 
 async def main():
     # تشغيل خادم keep_alive
